@@ -10,12 +10,14 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.awt.Robot;
 
 public class PasteHistoryDialog extends JDialog {
 
     private final ClipboardManager clipboardManager;
     private final JList<String> historyList;
     private final DefaultListModel<String> listModel;
+    private Runnable onDialogClosed;
 
     public PasteHistoryDialog(ClipboardManager clipboardManager) {
         this.clipboardManager = clipboardManager;
@@ -46,6 +48,18 @@ public class PasteHistoryDialog extends JDialog {
             @Override
             public void windowLostFocus(WindowEvent e) {
                 setVisible(false);
+                if (onDialogClosed != null) {
+                    onDialogClosed.run();
+                }
+            }
+        });
+
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosed(WindowEvent e) {
+                if (onDialogClosed != null) {
+                    onDialogClosed.run();
+                }
             }
         });
 
@@ -62,15 +76,34 @@ public class PasteHistoryDialog extends JDialog {
                         String selectedText = listModel.getElementAt(index);
                         pasteText(selectedText);
                         setVisible(false);
+                        if (onDialogClosed != null) {
+                            onDialogClosed.run();
+                        }
                     }
                 }
             }
         });
     }
 
-    //method is to show you dropdown list of copied available to paste
-    public void showDialog(int x, int y) {
+    public void showDialogWithClipboardInterception(int x, int y, String originalClipboardContent, Runnable onCloseCallback) {
+        this.onDialogClosed = onCloseCallback;
         listModel.clear();
+
+        // Add the original clipboard content at the top if it's not empty
+        if (originalClipboardContent != null && !originalClipboardContent.trim().isEmpty()) {
+            // Check if it's already in history to avoid duplicates
+            boolean found = false;
+            for (String item : clipboardManager.getClipboardHistory()) {
+                if (item.equals(originalClipboardContent)) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                listModel.addElement(originalClipboardContent + " (current)");
+            }
+        }
+
         //starts fresh with latest
         String[] history = clipboardManager.getClipboardHistory();
         //oldest is at 0
@@ -91,33 +124,58 @@ public class PasteHistoryDialog extends JDialog {
     }
 
     private void pasteText(String text) {
-        StringSelection stringSelection = new StringSelection(text);
-        Toolkit.getDefaultToolkit().getSystemClipboard().setContents(stringSelection, null);
-        clipboardManager.updateLastSeenClipboardContent(text);
+        // Clean the text - remove " (current)" suffix if present
+        String cleanText = text;
+        if (text.endsWith(" (current)")) {
+            cleanText = text.substring(0, text.length() - 11);
+        }
+
+        // Make cleanText final for lambda access
+        final String finalCleanText = cleanText;
+
+        // Place the selected text in clipboard
+        clipboardManager.restoreClipboard(cleanText);
+        clipboardManager.updateLastSeenClipboardContent(cleanText);
 
         setVisible(false);
 
+        // Use Robot to simulate the actual paste action
         new Thread(() -> {
-//                Thread.sleep(100);
-
-            Robot robot = null;
             try {
-                robot = new Robot();
-            } catch (AWTException e) {
-                throw new RuntimeException(e);
-            }
+                Robot robot = new Robot();
 
-            robot.keyRelease(KeyEvent.VK_CONTROL);
+                // Small delay to ensure clipboard is ready
+                Thread.sleep(50);
+
+                // Release any currently held modifier keys
+                robot.keyRelease(KeyEvent.VK_CONTROL);
                 robot.keyRelease(KeyEvent.VK_SHIFT);
+                robot.keyRelease(KeyEvent.VK_ALT);
+                robot.keyRelease(KeyEvent.VK_META);
 
-//                Thread.sleep(100);
+                // Small delay before paste
+                Thread.sleep(50);
 
+                // Simulate Ctrl+V to paste the selected content
                 robot.keyPress(KeyEvent.VK_CONTROL);
                 robot.keyPress(KeyEvent.VK_V);
                 robot.keyRelease(KeyEvent.VK_V);
                 robot.keyRelease(KeyEvent.VK_CONTROL);
 
+                System.out.println("Pasted via clipboard interception: " +
+                    (finalCleanText.length() > 50 ? finalCleanText.substring(0, 50) + "..." : finalCleanText));
+
+            } catch (Exception e) {
+                System.err.println("Error during paste simulation: " + e.getMessage());
+                // Fallback: just put text in clipboard and let user paste manually
+                Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
+                    new StringSelection(finalCleanText), null);
+            }
         }).start();
+
+        if (onDialogClosed != null) {
+            onDialogClosed.run();
+        }
     }
 
     private static class CustomCellRenderer extends DefaultListCellRenderer {

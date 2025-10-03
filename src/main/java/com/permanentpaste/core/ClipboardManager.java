@@ -3,6 +3,7 @@ package com.permanentpaste.core;
 import java.awt.Toolkit;
 import java.awt.datatransfer.Clipboard;
 import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.StringSelection;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executors;
@@ -92,5 +93,91 @@ public class ClipboardManager {
 
     public void updateLastSeenClipboardContent(String content) {
         this.lastSeenClipboardContent = content;
+    }
+
+    /**
+     * Immediately locks the clipboard by replacing its content with a special marker
+     * @return The original clipboard content that was replaced
+     */
+    public String lockClipboard() {
+        try {
+            Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
+            String originalContent = "";
+
+            if (clipboard.isDataFlavorAvailable(DataFlavor.stringFlavor)) {
+                originalContent = (String) clipboard.getData(DataFlavor.stringFlavor);
+            }
+
+            // Replace clipboard with empty string to block any paste
+            StringSelection emptySelection = new StringSelection("");
+            clipboard.setContents(emptySelection, null);
+
+            System.out.println("Clipboard locked - original content: " +
+                (originalContent.length() > 50 ? originalContent.substring(0, 50) + "..." : originalContent));
+
+            return originalContent;
+        } catch (Exception e) {
+            System.err.println("Error locking clipboard: " + e.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * Force lock clipboard with multiple attempts for enhanced reliability
+     * @return The original clipboard content that was replaced
+     */
+    public String forceLockClipboard() {
+        String originalContent = "";
+
+        for (int attempt = 0; attempt < 3; attempt++) {
+            originalContent = lockClipboard();
+
+            // Verify that clipboard is actually cleared
+            try {
+                Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
+                if (clipboard.isDataFlavorAvailable(DataFlavor.stringFlavor)) {
+                    String currentContent = (String) clipboard.getData(DataFlavor.stringFlavor);
+                    if (currentContent == null || currentContent.trim().isEmpty()) {
+                        // Successfully cleared
+                        System.out.println("Force lock successful on attempt " + (attempt + 1));
+                        break;
+                    }
+                } else {
+                    // No string content available - successfully cleared
+                    System.out.println("Force lock successful on attempt " + (attempt + 1));
+                    break;
+                }
+
+                // If we get here, clipboard still has content, try again
+                if (attempt < 2) {
+                    try {
+                        Thread.sleep(1); // 1ms delay between attempts
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("Error verifying clipboard lock on attempt " + (attempt + 1) + ": " + e.getMessage());
+            }
+        }
+
+        return originalContent;
+    }
+
+    /**
+     * Restores content to clipboard
+     * @param content The content to restore
+     */
+    public void restoreClipboard(String content) {
+        try {
+            Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
+            StringSelection selection = new StringSelection(content);
+            clipboard.setContents(selection, null);
+            System.out.println("Clipboard restored with: " +
+                (content.length() > 50 ? content.substring(0, 50) + "..." : content));
+        } catch (Exception e) {
+            System.err.println("Error restoring clipboard: " + e.getMessage());
+        }
     }
 }
