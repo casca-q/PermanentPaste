@@ -62,9 +62,6 @@ public class ClipboardManager {
         return monitoringTask != null && !monitoringTask.isDone() && !monitoringTask.isCancelled();
     }
 
-    /**
-     * This is the core method that runs every second to check the clipboard.
-     */
     private void checkClipboard() {
         try {
             Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
